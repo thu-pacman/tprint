@@ -38,21 +38,66 @@ static inline int tprt_atomic_inc(int* pos) {
   return rt;
 }
 
+#ifdef TPRT_SLAVE
+inline void slv_spin_lock(int* lock_p)
+{
+  unsigned int __tmp = 0;
+  unsigned int __cnt;
+  __asm__ __volatile__ (
+      "0:     ldw     %[__tmp], %[lock_p]\n"
+      "       beq     %[__tmp], 2f\n"
+      "       ldi     %[__cnt], 1024\n"
+      "       sll     %[__cnt], 4, %[__cnt]\n"
+      "1:     subw    %[__cnt], 1, %[__cnt]\n"
+      "       bne     %[__cnt], 1b\n"
+      "       br      0b\n"
+      "2:     faaw    %[__tmp], %[lock_p]\n"
+      "       bne     %[__tmp], 0b\n"
+      "       memb    \n"
+      "       br      3f\n"
+      "3:     unop    \n"
+      : [__tmp] "=&r" (__tmp), [__cnt] "=&r" (__cnt)
+      : [lock_p] "m" (*(lock_p))
+      : "memory");
+  return;
+}
+inline void slv_spin_unlock(int *lock_p)
+{
+  unsigned int __tmp = 0;
+  __asm__ __volatile__ (
+      "       memb    \n" 
+      "       mov     0, %[__tmp]\n"
+      "       stw     %[__tmp], %[lock_p]\n"
+      : [__tmp] "=&r" (__tmp)
+      : [lock_p] "m"  (*(lock_p))
+      : "memory"
+      );
+  return;
+}
+#endif
 
 inline void tprt_lock()
 {
+#ifdef TPRT_SLAVE
+  slv_spin_lock(&tprtlock_v);
+#else
   int ret = -1;
   while (ret != 0)
   {
     while (tprtlock_v != 0);
     ret = tprt_atomic_inc(&tprtlock_v);
   }
+#endif
 }
 
 inline void tprt_unlock(FILE* fp)
 {
   if (fp != NULL)
     fflush(fp);
+#ifdef TPRT_SLAVE
+  slv_spin_unlock(&tprtlock_v);
+#else
   tprtlock_v = 0;
+#endif
 }
 
